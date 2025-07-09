@@ -1,0 +1,114 @@
+import AVKit
+import Foundation
+import SwiftUI
+import VisionKit
+
+
+
+
+enum ScanType: String {
+    case barcode, text
+}
+
+enum DataScannerAccessStatusType{
+    case notDetermined
+    case cameraAccessNotGranted
+    case cameraNotAvailable
+    case scannerAvailable
+    case scannerNotAvailable
+    
+}
+
+@MainActor
+
+final class AppViewModel: ObservableObject {
+    
+    @Published var dataScannerAccessStatus: DataScannerAccessStatusType = .notDetermined
+    @Published var recognizedItems: [RecognizedItem] = []
+    @Published var scanType: ScanType = .barcode
+    @Published var textContentType: DataScannerViewController.TextContentType?
+    @Published var recognizesMultipleItems = true
+    
+    var recognizedDataType:
+    DataScannerViewController.RecognizedDataType {
+        scanType == .barcode ? .barcode() : .text(textContentType: textContentType)
+    }
+    
+    var headerText: String {
+        if recognizedItems.isEmpty {
+            return "Scanning \(scanType.rawValue)"
+        }
+        else {
+            return "Recognized \(recognizedItems.count) item(s)"
+        }
+    }
+    
+    
+    var dataScannerViewId: Int {
+        var hasher = Hasher()
+        hasher.combine(scanType)
+        hasher.combine(recognizesMultipleItems)
+        if let textContentType {
+            hasher.combine(textContentType)
+        }
+        return hasher.finalize()
+    }
+    
+    private var isScannerAvailable: Bool {
+        DataScannerViewController.isAvailable && DataScannerViewController.isSupported
+    }
+    
+    func requestDataScannerAccessStatus() async {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else{
+            dataScannerAccessStatus = .cameraNotAvailable
+            return
+        }
+        
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+            
+        case .authorized:
+            dataScannerAccessStatus = isScannerAvailable ? .scannerAvailable : .scannerAvailable
+            
+        case .restricted, .denied:
+            dataScannerAccessStatus = .cameraAccessNotGranted
+            
+        case .notDetermined:
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            if granted {
+                dataScannerAccessStatus = isScannerAvailable ? .scannerAvailable : .scannerNotAvailable
+            }else {
+                dataScannerAccessStatus = .cameraAccessNotGranted
+            }
+            
+        default: break
+        }
+    }
+    
+    
+    // Define the OpenFoodFactsResponse model to match the API response structure
+    struct productResponse: Decodable {
+        let results: [Product]
+    }
+    
+    // Define the Product model
+    struct Product: Decodable {
+        let productName: String
+        let brands: String
+        let ingredientsText: String
+        let ID: Int
+    }
+        
+        let apiKey = "DEMO_KEY"
+        
+        func fetchProductData() async throws -> [Product] {
+            let url = URL(string: "https://api.nal.usda.gov/fdc/v1/foods/search?api_key=DEMO_KEY&query=8465480703*=\(apiKey)")!
+            let(data, _) = try await URLSession.shared.data(from: url)
+            let decoded = try JSONDecoder().decode(productResponse.self, from: data)
+            return decoded.results
+        
+       enum CodingKeys: String, CodingKey {
+            case productName = "product_name"
+            case brands
+            case ingredientsText = "ingredients_text"
+            case ID = "image_url"
+        }
